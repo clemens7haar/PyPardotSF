@@ -12,15 +12,14 @@ try:
 except ImportError:
     import simplejson as json
 
-BASE_URI = 'https://pi.pardot.com'
-
 logger = logging.getLogger(__name__)
 
 
 class PardotAPI(object):
     def __init__(self, email=None, password=None, user_key=None,
                  sf_consumer_key=None, sf_consumer_secret=None,
-                 sf_refresh_token=None, business_unit_id=None,
+                 sf_refresh_token=None, business_unit_id=None, 
+                 production_instance=True,
                  version=4):
         self.email = email
         self.password = password
@@ -32,6 +31,15 @@ class PardotAPI(object):
         self.sf_consumer_key = sf_consumer_key
         self.sf_consumer_secret = sf_consumer_secret
         self.business_unit_id = business_unit_id
+
+        if production_instance == True:
+            self.domain = 'https://pi.pardot.com'
+            self.oauth_domain = 'https://login.salesforce.com/'
+        else:
+            """Sandbox or developer environment"""
+            self.domain = 'https://pi.demo.pardot.com'
+            self.oauth_domain = 'https://test.salesforce.com/'
+
         self._load_objects()
 
     def _load_objects(self):
@@ -53,7 +61,7 @@ class PardotAPI(object):
         - API Name
         - Contact Email.
     7. Go to API (Enable OAuth Settings), and select Enable OAuth Settings.
-        - In the Callback URL field, enter https://login.salesforce.com/
+        - In the Callback URL field, enter """ + self.oauth_domain + """
         - In the Selected OAuth Scopes field, select:
             - Access and manage your data (api)
             - Perform requests on your behalf at any time (refresh_token, offline_access)
@@ -73,6 +81,8 @@ To find the Pardot Business Unit ID, use Setup in Salesforce. From Setup, enter 
 (From https://developer.pardot.com/kb/authentication/ )""")
             sys.stdout.write("What is your business unit ID?: ")
             self.business_unit_id = input()
+        else:
+            self.business_unit_id = business_unit_id
         if not consumer_key or not consumer_secret:
             print("""Get your consumer key:
     1. Login to Salesforce. Switch to Lightening Experience if on classic (right-top link).
@@ -83,7 +93,10 @@ To find the Pardot Business Unit ID, use Setup in Salesforce. From Setup, enter 
             self.sf_consumer_key = input()
             sys.stdout.write("What is your consumer secret?: ")
             self.sf_consumer_secret = input()
-        url = f"https://{instance_id}.salesforce.com/services/oauth2/authorize?response_type=code&client_id={self.sf_consumer_key}&redirect_uri=https://login.salesforce.com/"
+        else:
+            self.sf_consumer_key = consumer_key
+            self.sf_consumer_secret = consumer_secret
+        url = f"https://{instance_id}.salesforce.com/services/oauth2/authorize?response_type=code&client_id={self.sf_consumer_key}&redirect_uri={self.oauth_domain}"
         print(f"""\nOpen the following page in a browser {url}.
 Allow access if any alert popup. You will be redirected to a login page, but do not login.""")
         sys.stdout.write("Copy and page the entire URL of the login page that contains code: ")
@@ -91,7 +104,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
         parsed = urlparse(new_url)
         code = parse_qs(parsed.query)["code"][0]
 
-        post_url = f"https://login.salesforce.com/services/oauth2/token?code={code}&grant_type=authorization_code&client_id={self.sf_consumer_key}&client_secret={self.sf_consumer_secret}&redirect_uri=https://login.salesforce.com/"
+        post_url = f"{self.oauth_domain}services/oauth2/token?code={code}&grant_type=authorization_code&client_id={self.sf_consumer_key}&client_secret={self.sf_consumer_secret}&redirect_uri={self.oauth_domain}"
         response = requests.post(post_url).json()
         self.sftoken = response.get("access_token")
         self.sftoken_refresh = response.get("refresh_token")
@@ -99,7 +112,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
             raise Exception("Failed to obtain token %s" % response)
 
     def revoke_sf_token(self):
-        url = "https://login.salesforce.com/services/oauth2/revoke"
+        url = f"{self.oauth_domain}services/oauth2/revoke"
         # header = {"Content-Type": "application/x-www-form-urlencoded"}
         response = requests.post(url,
                                  data={"token": self.sftoken})
@@ -107,7 +120,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
             raise Exception(response)
 
     def refresh_sf_token(self):
-        url = "https://login.salesforce.com/services/oauth2/token"
+        url = f"{self.oauth_domain}services/oauth2/token"
         data = {"grant_type": "refresh_token",
                 "client_id": self.sf_consumer_key,
                 "client_secret": self.sf_consumer_secret,
@@ -147,7 +160,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
 
         try:
             self._check_auth(object_name=object_name)
-            request = requests.post(self._full_path(object_name, self.version, path),
+            request = requests.post(self._full_path(self.domain, object_name, self.version, path),
                                     headers=headers,
                                     params=params,
                                     data=data,
@@ -198,7 +211,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
 
         try:
             self._check_auth(object_name=object_name)
-            request = requests.patch(self._full_path(object_name, self.version, path),
+            request = requests.patch(self._full_path(self.domain, object_name, self.version, path),
                                      headers=headers,
                                      params=params,
                                      data=data,
@@ -234,7 +247,7 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
         headers = self._build_auth_header()
         try:
             self._check_auth(object_name=object_name)
-            request = requests.get(self._full_path(object_name, self.version, path), params=params, headers=headers)
+            request = requests.get(self._full_path(self.domain, object_name, self.version, path), params=params, headers=headers)
             response = self._check_response(request)
             return response
         except PardotAPIError as err:
@@ -283,9 +296,9 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
             raise err
 
     @staticmethod
-    def _full_path(object_name, version, path=None):
+    def _full_path(domain, object_name, version, path=None):
         """Builds the full path for the API request"""
-        full = '{0}/api/{1}/version/{2}'.format(BASE_URI, object_name, version)
+        full = '{0}/api/{1}/version/{2}'.format(domain, object_name, version)
         if path:
             return full + '{0}'.format(path)
         return full
