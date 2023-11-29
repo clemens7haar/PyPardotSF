@@ -45,6 +45,8 @@ class PardotAPI(object):
     def _load_objects(self):
         if self.version == 3:
             from .objects_v3 import load_objects
+        if self.version == 5:
+            from .objects_v5 import load_objects
         else:
             from .objects import load_objects
         load_objects(self)
@@ -146,7 +148,8 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
 
         if params is None:
             params = {}
-        params.update({'format': 'json'})
+        if self.version < 5:
+            params.update({'format': 'json'})
 
         if data is None and json is None:
             data = {}
@@ -160,6 +163,13 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
 
         try:
             self._check_auth(object_name=object_name)
+
+            print(f"headers: {headers}")
+            print(f"params: {params}")
+            print(f"data: {data}")
+            print(f"files: {files}")
+            print(f"json: {json}")
+
             request = requests.post(self._full_path(self.domain, object_name, self.version, path),
                                     headers=headers,
                                     params=params,
@@ -201,7 +211,8 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
 
         if params is None:
             params = {}
-        params.update({'format': 'json'})
+        if self.version < 5:
+            params.update({'format': 'json'})
 
         if data is None and json is None:
             data = {}
@@ -243,7 +254,8 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
         """
         if params is None:
             params = {}
-        params.update({'format': 'json'})
+        if self.version < 5:
+            params.update({'format': 'json'})
         headers = self._build_auth_header()
         try:
             self._check_auth(object_name=object_name)
@@ -298,9 +310,18 @@ Allow access if any alert popup. You will be redirected to a login page, but do 
     @staticmethod
     def _full_path(domain, object_name, version, path=None):
         """Builds the full path for the API request"""
-        full = '{0}/api/{1}/version/{2}'.format(domain, object_name, version)
+        if version == 5:
+            if object_name == 'imports':
+                full = '{0}/api/v5/{1}'.format(domain, object_name)
+            else:
+                full = '{0}/api/v5/objects/{1}'.format(domain, object_name)
+        else:
+            full = '{0}/api/{1}/version/{2}'.format(domain, object_name, version)
+
         if path:
+            #print(full + '{0}'.format(path))
             return full + '{0}'.format(path)
+        #print(full)
         return full
 
     @staticmethod
